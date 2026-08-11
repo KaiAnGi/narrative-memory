@@ -1,0 +1,17 @@
+# Entorno Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Datos locales: novelas, base vectorial y resultados de evaluación
+# se quedan SOLO en tu máquina (ajuste #1)
+data/
+
+# Configuracion sensible / local
+.env
+
+# Artefactos
+dist/
+build/
+*.egg-info/
