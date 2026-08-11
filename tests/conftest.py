@@ -71,6 +71,7 @@ def settings(tmp_path) -> Settings:
         embedding_batch_size=2,
         embedding_model="fake-embed",
         llm_model="fake-llm",
+        books_dir=tmp_path / "books",
     )
 
 
