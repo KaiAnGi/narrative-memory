@@ -13,6 +13,7 @@ from app.ingestion.extractor import extract_docx, slugify
 from app.llm.ollama_llm import OllamaLLM
 from app.llm.prompts import build_qa_messages
 from app.models.schemas import Answer, IngestReport, SearchResult
+from app.retrieval.options import RetrievalOptions
 from app.retrieval.searcher import Searcher
 from app.vector_store.qdrant_store import QdrantStore
 
@@ -45,7 +46,7 @@ class Service:
             timeout=settings.llm_timeout_seconds,
             think=settings.llm_think,
         )
-        self._searcher = Searcher(self._store, self._embedder)
+        self._searcher = Searcher(self._store, self._embedder, llm=self._llm)
 
     def ingest_book(self, path: str | Path) -> IngestReport:
         """Extrae, trocea, embebe e indexa una novela en Qdrant."""
@@ -95,9 +96,13 @@ class Service:
         top_k: int | None = None,
         book_id: str | None = None,
         chapter: int | None = None,
+        options: RetrievalOptions | None = None,
     ) -> SearchResult:
         top_k = top_k or self._settings.top_k
-        return self._searcher.search(query, top_k, book_id=book_id, chapter=chapter)
+        options = options or RetrievalOptions.from_settings(self._settings)
+        return self._searcher.search(
+            query, top_k, book_id=book_id, chapter=chapter, options=options
+        )
 
     def ask_question(
         self,
@@ -105,9 +110,12 @@ class Service:
         top_k: int | None = None,
         book_id: str | None = None,
         chapter: int | None = None,
+        options: RetrievalOptions | None = None,
     ) -> Answer:
         top_k = top_k or self._settings.top_k
-        result = self.search(question, top_k, book_id=book_id, chapter=chapter)
+        result = self.search(
+            question, top_k, book_id=book_id, chapter=chapter, options=options
+        )
         messages = build_qa_messages(question, result.hits)
         answer = self._llm.chat(messages)
         used_chapters = sorted({h.chunk.chapter_index for h in result.hits})

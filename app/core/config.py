@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     embedding_timeout_seconds: float = 300.0
     llm_timeout_seconds: float = 600.0
 
+    # Retrieval (Fase 1.5): multi-query + diversidad, todo configurable.
+    # expansion: "off" (V1, el ganador en los experimentos) | "heuristic" (coste ~0)
+    #            | "llm" (caro).
+    retrieval_query_expansion: str = "off"
+    # rerank: "none" (defecto; ganador en experimentos) | "mmr".
+    retrieval_rerank: str = "none"
+    retrieval_max_queries: int = 4
+    retrieval_candidates_per_query: int = 8
+    retrieval_diversity_lambda: float = 0.7
+    retrieval_chapter_penalty: float = 0.5
+
 
 @lru_cache
 def get_settings() -> Settings:
