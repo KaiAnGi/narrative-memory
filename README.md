@@ -27,15 +27,15 @@ embeddings (qwen3-embedding:0.6b vía Ollama HTTP)
 Qdrant (embebido en el proceso, sin Docker ni binario adicional)
    │
    ▼
-búsqueda semántica + filtros (capítulo/libro)  ◄── pregunta
+retrieval (búsqueda semántica; opcional multi-query + rerank MMR por .env)  ◄── pregunta
    │
    ▼
 Qwen3 1.7B (vía Ollama)  →  evidencia → razonamiento → conclusión
 ```
 
 Sin frameworks de IA (ni LangChain ni similares): la comunicación con Ollama es HTTP directo.
-Sin agentes, memoria narrativa estructurada, PostgreSQL ni reranking en esta versión:
-esas son fases posteriores (ver [Roadmap](#roadmap)).
+Sin agentes, memoria narrativa estructurada, PostgreSQL ni LangChain: esas son fases
+posteriores (ver [Roadmap](#roadmap)).
 
 ## Requisitos
 
@@ -154,6 +154,25 @@ python scripts/evaluate_retrieval.py --eval-file data/eval_questions.json
 Informa por pregunta qué capítulos recuperó vs. cuáles se esperaban (`recall@k`) y un
 resumen agregado. El detalle se guarda en `data/eval_questions.results.json`.
 
+### 3b. Experimentos de retrieval (Fase 1.5)
+
+Compara **estrategias de recuperación** × **tamaños de chunk** con las mismas preguntas:
+
+- Estrategias: `baseline` (búsqueda única), `multi-query` (expansión heurística de la
+  pregunta en varias consultas), `multi-query+mmr` (multi-query + rerank MMR que reparte
+  los resultados entre capítulos distintos).
+- Chunk sizes: 300/50, 500/50 y 700/100 tokens de tamaño/overlap, cada uno en su propia
+  colección Qdrant (`narrative_c300_o50`, `narrative_c500_o50`, `narrative_c700_o100`).
+
+```powershell
+python scripts/evaluate_retrieval_experiments.py --book data/books/<tu-novela>.docx
+```
+
+Reutiliza colecciones ya pobladas automáticamente (no re-embebe por defecto). Mide
+`recall@k` (5/8/10), tasa de acierto (≥1 capítulo esperado), recall en preguntas
+multi-capítulo y el tiempo medio por consulta. Salidas en `data/experiments/`
+(detalle por configuración + `summary.json`); el baseline V1 no se toca.
+
 ### 4. API (opcional en V1)
 
 ```powershell
@@ -186,11 +205,17 @@ python scripts/ask.py "¿Qué pasa en el capítulo 3?"
 | `QDRANT_LOCAL_PATH` | `data/qdrant_local` | Persistencia del Qdrant embebido (modo local) |
 | `COLLECTION_NAME` | `narrative_chunks` | Nombre de la colección Qdrant |
 | `BOOKS_DIR` | `data/books` | Carpeta con los `.docx` |
-| `CHUNK_TOKENS` | `500` | Tamaño de chunk (valor inicial, NO definitivo — evaluar) |
-| `CHUNK_OVERLAP` | `50` | Tokens de solapamiento entre chunks |
+| `CHUNK_TOKENS` | `700` | Tamaño de chunk (700/100 recomendado por los experimentos Fase 1.5) |
+| `CHUNK_OVERLAP` | `100` | Tokens de solapamiento entre chunks |
 | `TOP_K` | `8` | Fragmentos recuperados por pregunta |
 | `EMBEDDING_BATCH_SIZE` | `32` | Lote de textos por llamada a Ollama |
 | `LLM_TEMPERATURE` | `0.2` | Temperatura del LLM |
+| `RETRIEVAL_QUERY_EXPANSION` | `off` | Expansión multi-query: `off`, `heuristic` o `llm` (off ganó los experimentos; la LLM es mucho más lenta) |
+| `RETRIEVAL_RERANK` | `none` | Rerank: `none` o `mmr` (diversidad por capítulo; none ganó los experimentos) |
+| `RETRIEVAL_MAX_QUERIES` | `4` | Máximo de sub-consultas generadas por pregunta |
+| `RETRIEVAL_CANDIDATES_PER_QUERY` | `8` | Candidatos por sub-consulta antes de fusionar/rerank |
+| `RETRIEVAL_DIVERSITY_LAMBDA` | `0.7` | Peso de la diversidad en MMR (1 = solo relevancia) |
+| `RETRIEVAL_CHAPTER_PENALTY` | `0.5` | Penalización a capítulos ya representados en MMR |
 
 Los modelos se cambian con variables de entorno: el sistema no está acoplado a ninguno.
 
@@ -213,11 +238,12 @@ app/
   ingestion/     extractor, detección de capítulos, chunking
   embeddings/    OllamaEmbedder (interfaz Embedder)
   vector_store/  QdrantStore (local o remote, mismo interfaz)
-  retrieval/     Searcher (búsqueda semántica + filtros)
+  retrieval/     Searcher multi-query + expanders (off/heurístico/LLM) + reranker MMR
   llm/           OllamaLLM + prompts (interfaz LLM intercambiable)
   api/           FastAPI mínima
   service.py     orquestación: ingest_book() / search() / ask_question()
-scripts/         ingest.py, ask.py, evaluate_retrieval.py, make_sample_book.py
+scripts/         ingest.py, ask.py, evaluate_retrieval.py,
+                 evaluate_retrieval_experiments.py, make_sample_book.py
 tests/           unitarios + smoke de integración opcional
 data/            (fuera de Git) books/, qdrant_local/, eval/
 ```
@@ -234,7 +260,7 @@ Los chunks nunca cortan un párrafo a la mitad.
 - Fase 2: agente con herramientas explícitas (`search_book`, `get_chapter`, ...).
 - Fase 3: memoria narrativa estructurada (personajes, acontecimientos, relaciones,
   estado de conocimiento por personaje, cronología) con PostgreSQL opcional.
-- Mejoras de retrieval: hybrid search, reranking, consultas múltiples, recuperación
-  cronológica. Evaluar primero si 500 tokens es el tamaño de chunk adecuado.
+- Mejoras de retrieval ya exploradas en Fase 1.5: consultas múltiples y rerank MMR
+  con diversidad por capítulo; experimentos de tamaño de chunk (300/500/700).
 - Extracción automática de personajes.
 - Frontend Next.js + TypeScript.
