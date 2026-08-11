@@ -41,10 +41,14 @@ class Chunk(BaseModel):
 class SearchHit(BaseModel):
     chunk: Chunk
     score: float
+    # Vector del chunk: solo se rellena cuando el reranking lo necesita (MMR).
+    vector: list[float] | None = None
 
 
 class SearchResult(BaseModel):
     query: str
+    # Consultas expandidas (multi-query). Una sola entrada = sin expansion.
+    queries: list[str] = Field(default_factory=list)
     hits: list[SearchHit] = Field(default_factory=list)
 
 

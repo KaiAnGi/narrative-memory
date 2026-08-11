@@ -114,6 +114,7 @@ class QdrantStore:
         vector: list[float],
         top_k: int,
         filters: dict | None = None,
+        with_vectors: bool = False,
     ) -> list[SearchHit]:
         query_filter = self._build_filter(filters or {})
         resp = self._client.query_points(
@@ -122,9 +123,14 @@ class QdrantStore:
             query_filter=query_filter,
             limit=top_k,
             with_payload=True,
+            with_vectors=with_vectors,
         )
         return [
-            SearchHit(chunk=Chunk(**point.payload), score=point.score)
+            SearchHit(
+                chunk=Chunk(**point.payload),
+                score=point.score,
+                vector=point.vector if with_vectors else None,
+            )
             for point in resp.points
         ]
 
