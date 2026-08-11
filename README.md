@@ -18,7 +18,7 @@ extracción de texto (python-docx)
 detección de capítulos (estilos Heading + regex)
    │
    ▼
-chunking (≈500 tokens, overlap, sin cortar párrafos)
+chunking (≈700 tokens, overlap, sin cortar párrafos)
    │
    ▼
 embeddings (qwen3-embedding:0.6b vía Ollama HTTP)
@@ -161,8 +161,10 @@ Compara **estrategias de recuperación** × **tamaños de chunk** con las mismas
 - Estrategias: `baseline` (búsqueda única), `multi-query` (expansión heurística de la
   pregunta en varias consultas), `multi-query+mmr` (multi-query + rerank MMR que reparte
   los resultados entre capítulos distintos).
-- Chunk sizes: 300/50, 500/50 y 700/100 tokens de tamaño/overlap, cada uno en su propia
-  colección Qdrant (`narrative_c300_o50`, `narrative_c500_o50`, `narrative_c700_o100`).
+- Chunk sizes: 300/50, 500/50, 700/50 y 700/100 tokens de tamaño/overlap, cada uno en su
+  propia colección Qdrant (`narrative_c300_o50`, `narrative_c500_o50`,
+  `narrative_c700_o100`, ...). El ganador fue **700/100**; la comparación completa está en
+  `docs/retrieval_experiments_phase1_5.md`.
 
 ```powershell
 python scripts/evaluate_retrieval_experiments.py --book data/books/<tu-novela>.docx

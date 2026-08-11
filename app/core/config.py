@@ -35,9 +35,10 @@ class Settings(BaseSettings):
     # Datos
     books_dir: Path = BASE_DIR / "data" / "books"
 
-    # Ingestion / retrieval (ajuste #2: valores iniciales, no definitivos)
-    chunk_tokens: int = 500
-    chunk_overlap: int = 50
+    # Ingestion / retrieval. 700/100 es el resultado de los experimentos de Fase 1.5
+    # (recall@8 0.750 vs 0.719 con 500/50). Si cambias estos valores, vuelve a ingerir.
+    chunk_tokens: int = 700
+    chunk_overlap: int = 100
     top_k: int = 8
     embedding_batch_size: int = 32
     llm_temperature: float = 0.2
