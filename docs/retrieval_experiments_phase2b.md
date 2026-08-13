@@ -25,7 +25,7 @@ intacto.
 
 ## Metodologia
 
-- **Preguntas**: las mismas 16 de `data/eval_questions.json` (fuera de Git).
+- **Preguntas**: las mismas 16 de `data/eval_questions.json`.
 - **Coleccion**: `narrative_c700_o100` (chunks 700/100, ganadora de la Fase 1.5).
 - **Top-k**: 8. Metricas con k=5, 8, 10 (recall de capítulos esperados, acierto
   con >=1 capítulo esperado, recall medio multi-capítulo).
@@ -35,8 +35,7 @@ intacto.
   - `planned` : `expansion=off`, `rerank=none`, `planning=heuristic` (detector
     barato + 2-3 consultas dirigidas por rondas, solo en complejas).
 - **Harness**: `scripts/evaluate_answers.py` con modo `--strategy` (retirado
-  junto con el codigo de la fase); datos brutos en `data/eval_answers/`
-  (fuera de Git).
+  junto con el codigo de la fase); datos brutos en `data/eval_answers/`.
 
 ## Resultados
 
@@ -71,7 +70,7 @@ Q7→cap. 12, Q8→cap. 1, Q11→cap. 24, Q12→cap. 5, Q13→cap. 13, Q15→cap
 Ademas, el planner introdujo **regresiones**:
 
 - **Q10**: perdio el cap. 23 que el baseline recuperaba; la respuesta generada
-  paso a ser incorrecta ("robo de libros" en lugar de "acusación de asesinato").
+  paso a ser incorrecta.
 - **Q11**: perdio el cap. 8 y la respuesta quedo generica (no podía responder).
 
 ## Causa raiz del fracaso
