@@ -57,7 +57,7 @@ def test_heuristic_empty_question():
 
 class _FakeLLM:
     def chat(self, messages):
-        return "regreso del museo protagonistas\n- consecuencias protagonistas\n3. evolución relación protagonistas"
+        return "regreso del museo con protagonistas\n- consecuencias para los protagonistas\n3. evolución relación de los protagonistas"
 
 
 def test_llm_parses_lines_and_keeps_original():
@@ -65,9 +65,9 @@ def test_llm_parses_lines_and_keeps_original():
     queries = expander.expand("¿Cómo evoluciona la relación desde el museo hasta las consecuencias?")
     assert queries[0].startswith("¿Cómo evoluciona")
     assert queries[1:] == [
-        "regreso del museo protagonistas",
-        "consecuencias protagonistas",
-        "evolución relación protagonistas",
+        "regreso del museo con protagonistas",
+        "consecuencias para los protagonistas",
+        "evolución relación de los protagonistas",
     ]
 
 
