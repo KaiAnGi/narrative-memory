@@ -1,8 +1,8 @@
 # Experimentos de retrieval (Fase 1.5)
 
-Resultados sobre la novela de prueba local (`data/`, fuera de Git),
+Resultados sobre la novela de prueba local (`data/`),
 misma 16 preguntas de `data/eval_questions.json` que el baseline V1. Datos brutos y
-detalles por pregunta en `data/experiments/` (fuera de Git); este documento queda
+detalles por pregunta en `data/experiments/`; este documento queda
 commiteado para que la conclusión sea trazable.
 
 ## Metodología
@@ -49,12 +49,12 @@ multi-query+mmr.
    conserva más contexto de la escena.
 
 2. **Las sub-consultas heurísticas añaden ruido, no capítulos nuevos.** Ejemplo
-   diagnóstico (pregunta del café, capítulo esperado 9, colección V1):
-   - El query original sí recupera el capítulo 9 (rank 8, score 0.599).
-   - La sub-consulta `"tomar café local regentado criaturas diminutas"` **no recupera
-     ningún chunk del capítulo 9** (misma brecha de vocabulario que el baseline) y
+   diagnóstico:
+   - El query original sí recupera el capítulo deseado (rank 8, score 0.599).
+   - La sub-consulta **no recupera
+     ningún chunk del capítulo deseado** (misma brecha de vocabulario que el baseline) y
      aporta chunks de otros capítulos con scores hasta 0.65.
-   - Al fusionar por score máximo, esos chunks ruidosos **expulsan al capítulo 9** del
+   - Al fusionar por score máximo, esos chunks ruidosos **expulsan al capítulo deseado** del
      top-8: recall@8 pasa de 1.0 a 0.0.
 
 3. **MMR reparte los 8 huecos sobre un pool inflado por ruido.** Al ampliar el pool con
@@ -63,8 +63,7 @@ multi-query+mmr.
    pool sí contenía los capítulos esperados y MMR los recuperó; en la novela real el pool
    los pierde antes.
 
-4. **Las brechas de vocabulario persisten en todas las configuraciones.** La pregunta del
-   elemento/baile (capítulo 12) y la de pesadillas/prólogo (capítulo 1) siguen sin
+4. **Las brechas de vocabulario persisten en todas las configuraciones.** Varias preguntas siguen sin
    recuperar su capítulo con recall@8 = 0 en cualquier combinación: la expansión heurística
    reformula con las mismas palabras, y ninguna estrategia cierra la brecha léxica.
 
@@ -78,7 +77,7 @@ multi-query+mmr.
 
 Medición real de la expansión LLM (2 preguntas, modelo ya cargado): **15.5 s** la
 primera (incluye warmup) y **3.4 s** la segunda. La expansión LLM sí genera sinónimos
-relevantes (`transporte`, `viaje`, etc.), pero su coste es prohibitivo frente al
+relevantes, pero su coste es prohibitivo frente al
 beneficio no medido.
 
 ## Recomendaciones
