@@ -13,6 +13,7 @@ from app.ingestion.extractor import extract_docx, slugify
 from app.llm.ollama_llm import OllamaLLM
 from app.llm.prompts import build_qa_messages
 from app.models.schemas import Answer, IngestReport, SearchResult
+from app.retrieval.hybrid import HybridResult, HybridSearcher
 from app.retrieval.options import RetrievalOptions
 from app.retrieval.searcher import Searcher
 from app.vector_store.qdrant_store import QdrantStore
@@ -102,6 +103,37 @@ class Service:
         options = options or RetrievalOptions.from_settings(self._settings)
         return self._searcher.search(
             query, top_k, book_id=book_id, chapter=chapter, options=options
+        )
+
+    def search_hybrid(
+        self,
+        query: str,
+        units: list[dict],
+        memory_chapters: list[dict],
+        top_k: int | None = None,
+        book_id: str | None = None,
+        baseline_options: RetrievalOptions | None = None,
+    ) -> HybridResult:
+        """Retrieval hybrid experimental (Fase 2C): Qdrant + memoria narrativa.
+
+        La memoria solo localiza chunks; el texto final se resuelve en Qdrant.
+        No cambia el comportamiento del pipeline: el baseline sigue intacto.
+        """
+        settings = self._settings
+        top_k = top_k or settings.top_k
+        searcher = HybridSearcher(
+            self._store,
+            self._embedder,
+            units,
+            baseline_options=baseline_options,
+            narrative_top=settings.hybrid_narrative_top,
+            chunks_per_chapter=settings.hybrid_chunks_per_chapter,
+            fusion=settings.hybrid_fusion,
+            weight_baseline=settings.hybrid_weight_baseline,
+            weight_narrative=settings.hybrid_weight_narrative,
+        )
+        return searcher.search(
+            query, top_k=top_k, book_id=book_id, memory_chapters=memory_chapters
         )
 
     def ask_question(

@@ -56,6 +56,18 @@ class Settings(BaseSettings):
     retrieval_diversity_lambda: float = 0.7
     retrieval_chapter_penalty: float = 0.5
 
+    # Retrieval hybrid (experimental, Fase 2C). OFF por defecto: el pipeline usa
+    # el baseline intacto. Cuando retrieval_hybrid="narrative", el retrieval
+    # combina Qdrant (baseline) + memoria narrativa (solo localiza chunks; el
+    # texto final se resuelve siempre en Qdrant). Ver app/retrieval/hybrid.py.
+    retrieval_hybrid: str = "off"  # "off" | "narrative"
+    hybrid_narrative_top: int = 8      # capitulos de la memoria a expandir
+    hybrid_chunks_per_chapter: int = 1 # chunks por capitulo narrativo
+    hybrid_fusion: str = "rrf"         # "rrf" (defecto) | "score" (min-max)
+    hybrid_weight_baseline: float = 0.4
+    hybrid_weight_narrative: float = 0.6
+    hybrid_memory_path: Path = BASE_DIR / "data" / "narrative_memory.json"
+
 
 @lru_cache
 def get_settings() -> Settings:

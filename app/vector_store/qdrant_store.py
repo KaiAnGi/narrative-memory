@@ -134,6 +134,24 @@ class QdrantStore:
             for point in resp.points
         ]
 
+    def get_chunks(
+        self, book_id: str, chunk_indices: Iterable[int]
+    ) -> dict[int, Chunk]:
+        """Resuelve chunks originales por su chunk_index global (traza de la memoria).
+
+        La memoria narrativa solo localiza: sus ``source_chunks``/``chunk_refs``
+        son indices globales; el texto real se obtiene aqui de Qdrant.
+        """
+        indices = list(chunk_indices)
+        if not indices:
+            return {}
+        resp = self._client.retrieve(
+            collection_name=self._collection,
+            ids=[point_id(book_id, i) for i in indices],
+            with_vectors=False,
+        )
+        return {point.payload["chunk_index"]: Chunk(**point.payload) for point in resp}
+
     def count(self, book_id: str | None = None) -> int:
         count_filter = None
         if book_id is not None:
