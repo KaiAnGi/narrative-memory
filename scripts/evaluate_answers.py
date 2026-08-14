@@ -48,7 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import Settings, get_settings  # noqa: E402
 from app.llm.ollama_llm import OllamaLLM  # noqa: E402
-from app.llm.prompts import SYSTEM_PROMPT, build_qa_messages  # noqa: E402
+from app.llm.prompts import SYSTEM_PROMPT, build_qa_messages, resolve_system_prompt  # noqa: E402
 from app.retrieval.options import RetrievalOptions  # noqa: E402
 from app.service import Service  # noqa: E402
 
@@ -102,7 +102,7 @@ def _metrics(rows: list[dict]) -> dict:
     return summary
 
 
-def _row(service, item, top_k, book_id, options, with_llm):
+def _row(service, item, top_k, book_id, options, with_llm, system_prompt=SYSTEM_PROMPT):
     question = item["question"]
     expected = set(item.get("expected_chapters", []))
     expected_facts = item.get("expected_facts", [])
@@ -111,7 +111,7 @@ def _row(service, item, top_k, book_id, options, with_llm):
     result = service.search(question, top_k=top_k, book_id=book_id, options=options)
     retrieval_s = round(time.perf_counter() - t0, 3)
 
-    messages = build_qa_messages(question, result.hits)
+    messages = build_qa_messages(question, result.hits, system_prompt=system_prompt)
     context_text = messages[1]["content"]
     hits = [
         {
@@ -255,18 +255,20 @@ def _build_service(settings: Settings, model: str | None) -> Service:
     return Service(settings, llm=llm)
 
 
-def _generate_rows_from_results(service: Service, src_rows: list[dict]) -> list[dict]:
+def _generate_rows_from_results(
+    service: Service, src_rows: list[dict], system_prompt: str = SYSTEM_PROMPT
+) -> list[dict]:
     """Regenera SOLO la respuesta sobre el contexto ya guardado de un results previo.
 
     Mantiene intactos chunking, retrieval, scores, recall y contexto; cambia
-    unicamente el LLM de generacion. El mensaje user es el texto exacto que se
-    envio antes (campo ``context`` del results_*.json) y el system el mismo prompt.
+    unicamente el system prompt / LLM de generacion. El mensaje user es el texto
+    exacto que se envio antes (campo ``context`` del results_*.json).
     """
     rows = []
     for row in src_rows:
         new = dict(row)
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": row["context"]},
         ]
         t0 = time.perf_counter()
@@ -294,22 +296,27 @@ def main() -> None:
         "--from-results",
         default=None,
         help="Experimento controlado de generacion: reutiliza los chunks/contexto "
-        "EXACTOS de un results_*.json previo y solo regenera la respuesta con --model. "
-        "El retrieval queda intacto y cambia unicamente el LLM.",
+        "EXACTOS de un results_*.json previo y solo regenera la respuesta con --model "
+        "y --system-prompt. El retrieval queda intacto y cambia unicamente la generacion.",
     )
     parser.add_argument("--model", default=None, help="Modelo LLM (por defecto el de .env)")
+    parser.add_argument(
+        "--system-prompt",
+        default="baseline",
+        help="System prompt de generacion: nombre de preset ('baseline'/'grounding') "
+        "o ruta a un archivo de texto.",
+    )
     args = parser.parse_args()
 
     if args.from_results and args.retrieval_only:
         parser.error("--from-results no es compatible con --retrieval-only")
-    if args.from_results and not args.model:
-        parser.error("--from-results requiere --model (modelo con el que regenerar)")
 
     label = args.label
     settings = get_settings()
     if args.collection:
         settings.collection_name = args.collection
     service = _build_service(settings, args.model)
+    system_prompt = resolve_system_prompt(args.system_prompt)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -318,7 +325,7 @@ def main() -> None:
     if args.from_results:
         from_results_src = json.loads(Path(args.from_results).read_text(encoding="utf-8"))
         try:
-            rows = _generate_rows_from_results(service, from_results_src["rows"])
+            rows = _generate_rows_from_results(service, from_results_src["rows"], system_prompt)
             for row in rows:
                 print(f"[{label}] gen={row['generation_s']}s total={row['total_s']}s  {row['question'][:60]}")
         finally:
@@ -333,7 +340,15 @@ def main() -> None:
         try:
             rows = []
             for item in questions:
-                row = _row(service, item, top_k, book_id, options, with_llm=not args.retrieval_only)
+                row = _row(
+                    service,
+                    item,
+                    top_k,
+                    book_id,
+                    options,
+                    with_llm=not args.retrieval_only,
+                    system_prompt=system_prompt,
+                )
                 rows.append(row)
                 status = f"recall@8={row['recall@8']:.2f}"
                 if row.get("generation_s") is not None:
@@ -352,6 +367,7 @@ def main() -> None:
             "label": label,
             "llm_model": args.model,
             "llm_think": settings.llm_think,
+            "prompt": args.system_prompt,
             "embedding_model": src_meta.get("embedding_model", settings.embedding_model),
             "chunk_tokens": src_meta.get("chunk_tokens", settings.chunk_tokens),
             "chunk_overlap": src_meta.get("chunk_overlap", settings.chunk_overlap),
@@ -368,6 +384,7 @@ def main() -> None:
             "label": label,
             "llm_model": settings.llm_model,
             "llm_think": settings.llm_think,
+            "prompt": args.system_prompt,
             "embedding_model": settings.embedding_model,
             "chunk_tokens": settings.chunk_tokens,
             "chunk_overlap": settings.chunk_overlap,

@@ -212,6 +212,39 @@ Reutiliza colecciones ya pobladas automáticamente (no re-embebe por defecto). M
 multi-capítulo y el tiempo medio por consulta. Salidas en `data/experiments/`
 (detalle por configuración + `summary.json`); el baseline V1 no se toca.
 
+### 3c. Experimentos de generación (Fase 2D)
+
+Aísla el efecto del **system prompt** en la generación manteniendo modelo y contexto
+fijos: `evaluate_answers.py --from-results` reutiliza el contexto exacto de un
+`results_*.json` previo y solo regenera la respuesta con otro prompt/LLM, y
+`compare_answers.py` cruza dos ejecuciones (grade, tiempo y tokens por pregunta).
+
+```powershell
+# Regenerar las respuestas con el prompt "grounding" sobre el contexto del baseline
+python scripts/evaluate_answers.py --from-results data/eval_answers/results_baseline700.json `
+  --model qwen3:1.7b --system-prompt grounding --label grounding700
+
+# Comparar baseline vs grounding
+python scripts/compare_answers.py `
+  --a-results data/eval_answers/results_baseline700.json --a-grades data/eval_answers/grades_baseline700.json --a-label baseline `
+  --b-results data/eval_answers/results_grounding700.json --b-grades data/eval_answers/grades_grounding700.json --b-label grounding `
+  --out data/eval_answers/compare_grounding_vs_baseline.md
+```
+
+El preset por defecto es `--system-prompt baseline` (`SYSTEM_PROMPT`, sin cambios de
+comportamiento en runtime); `grounding` es una variante estricta experimental que no se
+usa en producción.
+
+> **Veredicto Fase 2D (con datos):** el prompt de grounding estricto (identificar evidencia
+> primero, distinguir hechos/inferencias, prohibido conocimiento externo, citar fragmentos)
+> **no mejora** la calidad con `qwen3:1.7b`/`think=false`: baseline 3 correctas / 8 parciales /
+> 4 incorrectas / 1 alucinación vs grounding 2 / 9 / 3 / 2. Solo redujo ligeramente tiempo y
+> tokens. Los errores persisten incluso con la evidencia correcta en el contexto (elemento
+> primordial, destino tras el café, cargo judicial) y, ante gaps de retrieval, el modelo sigue
+> alucinando en lugar de declarar evidencia insuficiente. El cuello de botella actual es la
+> **capacidad del modelo**, no el prompt. Veredicto completo en
+> `data/eval_answers/compare_grounding_vs_baseline.md`.
+
 ### 4. API (opcional en V1)
 
 ```powershell
@@ -313,8 +346,12 @@ Los chunks nunca cortan un párrafo a la mitad.
   nada sobre la memoria sola y duplico el tiempo; se conserva solo como referencia
   (`retrieval_hybrid=off`). Veredicto: el cuello de botella es la **generacion**, no el
   retrieval.
-- **Fase 3 (siguiente):** generacion con modelo mas capaz, grounding estricto en el contexto
-  recuperado e instrucciones anti-alucinacion.
+- **Fase 2D — prompt grounding (completada, descartada):** el prompt estricto de grounding no
+  mejoro la generacion sobre el baseline (incluso empeoro ligeramente la calidad); se conserva
+  solo como infraestructura de experimento (`--system-prompt grounding`). El cuello de botella
+  sigue siendo la **capacidad del modelo**.
+- **Fase 3 (siguiente):** benchmark controlado de modelos LLM (mismo contexto/retrieval,
+  distintos modelos y `think` on/off) para elegir el modelo de generacion.
 - Fase 4: agente con herramientas explicitas (`search_book`, `get_chapter`, ...).
 - Fase 5: memoria narrativa estructurada en grafo (personajes, acontecimientos, relaciones,
   estado de conocimiento por personaje, cronologia) con PostgreSQL opcional.
