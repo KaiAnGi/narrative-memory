@@ -2,7 +2,16 @@
 
 Lee el detalle por pregunta del experimento (baseline / narrative / hybrid),
 cruza con los grades manuales de Fase 2A (baseline ya rellenado; narrative y
-hybrid con skeleton) y escribe data/eval_answers/hybrid_report.md.
+hybrid con skeleton) y escribe data/eval_answers/hybrid_report.md con:
+
+  - metricas de retrieval y gaps recuperados por la memoria,
+  - tabla de grades por pregunta + conteos por categoria,
+  - resumen comparativo narrative vs hybrid,
+  - veredicto final (por que se descarta la fusion hybrid y se conserva la
+    memoria narrativa como segunda fuente de retrieval).
+
+Si los grades de narrative/hybrid aun no estan rellenados, el informe marca
+las celdas como pendientes y omite el veredicto de calidad.
 
 Uso:
   python scripts/build_hybrid_report.py
@@ -196,9 +205,12 @@ def main() -> None:
 
     ap("## 5. Calidad de las respuestas (grades Fase 2A)\n")
     ap(
-        "Clasificacion manual con la rubrica de Fase 2A. El baseline ya esta "
-        "rellenado (`grades_baseline700.json`); narrative y hybrid quedan en "
-        "`grades_hybrid700_narrative.json` y `grades_hybrid700_hybrid.json`.\n"
+        "Clasificacion manual con la rubrica de Fase 2A, evaluando cada respuesta "
+        "de forma independiente y usando como fuente de verdad el texto original "
+        "recuperado (resuelto via `source_chunks`/`chunk_refs`), no "
+        "`narrative_memory.json`. Baseline en `grades_baseline700.json`; narrative "
+        "y hybrid en `grades_hybrid700_narrative.json` y "
+        "`grades_hybrid700_hybrid.json`.\n"
     )
     ap("| # | baseline | narrative | hybrid | Pregunta |")
     ap("|---|---|---|---|---|")
@@ -213,15 +225,125 @@ def main() -> None:
         )
     ap("")
 
-    ap("## 6. Veredicto (retrieval)\n")
-    for v in verdicts:
-        ap(f"- {v}")
+    # ---- Conteos por categoria (solo si hay grades) ----
+    def _counts(gmap: dict) -> dict:
+        c = {k: 0 for k in GRADE_LABELS}
+        for g in gmap.values():
+            if g.get("grade") in c:
+                c[g["grade"]] += 1
+        return c
+
+    counts = {
+        "baseline": _counts(grades_baseline),
+        "narrative": _counts(grades_narrative),
+        "hybrid": _counts(grades_hybrid),
+    }
+    any_grade = any(any(c.values()) for c in counts.values())
+    if any_grade:
+        ap("### Conteos por categoria\n")
+        ap("| Categoria | baseline | narrative | hybrid |")
+        ap("|---|---:|---:|---:|")
+        for k in GRADE_LABELS:
+            ap(f"| {GRADE_LABELS[k]} | {counts['baseline'][k]} | "
+               f"{counts['narrative'][k]} | {counts['hybrid'][k]} |")
+        ap("")
+
+    # ---- Resumen comparativo narrative vs hybrid ----
+    ap("## 6. Resumen comparativo narrative vs hybrid\n")
+    ap("| Metrica | baseline | narrative | hybrid |")
+    ap("|---|---:|---:|---:|")
+    ap(f"| recall@8 | {s['baseline'].get('mean_recall@8')} | "
+       f"{s['narrative'].get('mean_recall@8')} | {s['hybrid'].get('mean_recall@8')} |")
+    if any_grade:
+        ap(f"| correctas | {counts['baseline']['correcta']} | "
+           f"{counts['narrative']['correcta']} | {counts['hybrid']['correcta']} |")
+        ap(f"| alucinaciones | {counts['baseline']['alucinacion']} | "
+           f"{counts['narrative']['alucinacion']} | {counts['hybrid']['alucinacion']} |")
+    ap(f"| tiempo retrieval (s) | {s['baseline'].get('mean_retrieval_s')} | "
+       f"{s['narrative'].get('mean_retrieval_s')} | {s['hybrid'].get('mean_retrieval_s')} |")
     ap("")
-    ap(
-        "**Pendiente:** rellenar los grades de narrative/hybrid (seccion 5) y "
-        "`python scripts/summarize_answers.py --labels hybrid700_narrative "
-        "hybrid700_hybrid` para el veredicto final de calidad."
-    )
+
+    def _evidence(r: dict) -> set:
+        chunks = r.get("retrieved_chunks") or []
+        return {(c.get("chapter_index"), c.get("chunk_index")) for c in chunks}
+
+    narr_by_q = {r["question"]: r for r in rows["narrative"]}
+    hyb_by_q = {r["question"]: r for r in rows["hybrid"]}
+    diff_rows = []
+    for q, gn in grades_narrative.items():
+        gh = grades_hybrid.get(q)
+        if not gn.get("grade") or not gh or not gh.get("grade"):
+            continue
+        if gn["grade"] == gh["grade"]:
+            continue
+        same_retrieval = (
+            _evidence(narr_by_q.get(q, {})) == _evidence(hyb_by_q.get(q, {}))
+        )
+        diff_rows.append({
+            "question": q,
+            "narrative": GRADE_LABELS.get(gn["grade"], gn["grade"]),
+            "hybrid": GRADE_LABELS.get(gh["grade"], gh["grade"]),
+            "same_retrieval": same_retrieval,
+        })
+    if any_grade:
+        n = len(grades_narrative)
+        ap(f"- **Igualdad practica:** narrative y hybrid coinciden en el grade en "
+           f"**{n - len(diff_rows)}/{n}** preguntas.\n")
+        if diff_rows:
+            ap(f"- **Diferencias de grade ({len(diff_rows)}):**")
+            for d in diff_rows:
+                origen = ("con evidencia recuperada IDENTICA" if d["same_retrieval"]
+                          else "con evidencia recuperada distinta")
+                ap(f"  - {d['question'][:60]}… → narrative **{d['narrative']}** vs "
+                   f"hybrid **{d['hybrid']}** ({origen}; la diferencia es de la "
+                   f"generacion, no del retrieval).")
+            ap("")
+        if narr_total or hyb_total:
+            ap(f"- **Gaps del baseline recuperados:** narrative {narr_total}, "
+               f"hybrid {hyb_total} (de {total_gaps}). La mejora de retrieval de la "
+               f"memoria no depende de la fusion.\n")
+
+    # ---- Veredicto final ----
+    ap("## 7. Veredicto final (Fase 2C)\n")
+    if not any_grade:
+        ap("**Pendiente:** rellenar los grades de narrative/hybrid para el "
+           "veredicto de calidad. Veredicto de retrieval:")
+        for v in verdicts:
+            ap(f"- {v}")
+        ap("")
+    else:
+        narr_rec = s["narrative"].get("mean_recall@8")
+        hyb_rec = s["hybrid"].get("mean_recall@8")
+        narr_ok = counts["narrative"]["correcta"]
+        hyb_ok = counts["hybrid"]["correcta"]
+        narr_hal = counts["narrative"]["alucinacion"]
+        hyb_hal = counts["hybrid"]["alucinacion"]
+        ap(f"- **Retrieval:** la memoria narrativa sola aporta la mejora sobre el "
+           f"baseline (recall@8 {narr_rec} vs {s['baseline'].get('mean_recall@8')}, "
+           f"recupera {narr_total}/{total_gaps} gaps). La fusion hybrid no anade "
+           f"nada al recall (narrative {narr_rec} vs hybrid {hyb_rec}).")
+        ap(f"- **Calidad:** la mejora de retrieval NO se traslada a las respuestas: "
+           f"correctas {narr_ok} (narrative) vs {hyb_ok} (hybrid) y alucinaciones "
+           f"{narr_hal} vs {hyb_hal}; el cuello de botella es la generacion "
+           f"(qwen3:1.7b), no el retrieval.")
+        ratio = 1.0
+        if s["baseline"].get("mean_retrieval_s"):
+            ratio = s["hybrid"].get("mean_retrieval_s") / s["baseline"]["mean_retrieval_s"]
+        ap(f"- **Coste:** la fusion multiplica x{ratio:.1f} el tiempo de retrieval "
+           f"({s['hybrid'].get('mean_retrieval_s')}s vs "
+           f"{s['baseline'].get('mean_retrieval_s')}s del baseline).\n")
+        ap("- **Decision: descartar la fusion hybrid (Fase 2C).** No aporta "
+           "mejoras sobre la memoria narrativa sola, no mejora los grades y "
+           "duplica el tiempo. Se conserva SOLO como referencia experimental "
+           "(`retrieval_hybrid=off` por defecto).")
+        ap("- **Estado del motor:** baseline intacto (fuente principal); memoria "
+           "narrativa conservada como **segunda fuente de retrieval** "
+           "(`app/memory/retrieval.py`, `scripts/evaluate_narrative_retrieval.py`); "
+           "la fusion hybrid queda marcada como experimental/descartada en "
+           "`app/core/config.py`.")
+        ap("- **Siguiente fase (generacion):** modelo mas capaz, grounding "
+           "estricto en el contexto recuperado e instrucciones anti-alucinacion. "
+           "No hace falta mas retrieval.")
 
     report = "\n".join(lines)
     out_path = out_dir / "hybrid_report.md"

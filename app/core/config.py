@@ -56,11 +56,13 @@ class Settings(BaseSettings):
     retrieval_diversity_lambda: float = 0.7
     retrieval_chapter_penalty: float = 0.5
 
-    # Retrieval hybrid (experimental, Fase 2C). OFF por defecto: el pipeline usa
-    # el baseline intacto. Cuando retrieval_hybrid="narrative", el retrieval
-    # combina Qdrant (baseline) + memoria narrativa (solo localiza chunks; el
-    # texto final se resuelve siempre en Qdrant). Ver app/retrieval/hybrid.py.
-    retrieval_hybrid: str = "off"  # "off" | "narrative"
+    # Retrieval hybrid (EXPERIMENTAL, DESCARTADO en Fase 2C). OFF por defecto:
+    # el pipeline usa el baseline intacto. Se conserva SOLO como referencia;
+    # el veredicto esta en data/eval_answers/hybrid_report.md (la fusion no
+    # mejoro nada sobre la memoria narrativa sola y doblo el tiempo de
+    # retrieval). La segunda fuente real de retrieval es la MEMORIA NARRATIVA
+    # (ver app/memory/retrieval.py y scripts/evaluate_narrative_retrieval.py).
+    retrieval_hybrid: str = "off"  # "off" (defecto) | "narrative" (referencia)
     hybrid_narrative_top: int = 8      # capitulos de la memoria a expandir
     hybrid_chunks_per_chapter: int = 1 # chunks por capitulo narrativo
     hybrid_fusion: str = "rrf"         # "rrf" (defecto) | "score" (min-max)
