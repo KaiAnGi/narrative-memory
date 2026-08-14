@@ -21,21 +21,22 @@ detección de capítulos (estilos Heading + regex)
 chunking (≈700 tokens, overlap, sin cortar párrafos)
    │
    ▼
-embeddings (qwen3-embedding:0.6b vía Ollama HTTP)
+embeddings (vía Ollama HTTP)
    │
    ├─────────────────────────────────────────────┐
    ▼                                             ▼
 Qdrant (embebido, sin Docker)          narrative_memory.json
-fuente principal de retrieval          (segunda fuente, Fase 2B;
-                                       se construye con
-                                       scripts/build_narrative_memory.py)
+fuente principal de retrieval          (segunda fuente: índice narrativo
+                                        que localiza capítulos/trozos;
+                                        ver docs/memory_narrative_phase2b_2c.md)
    │                                             │
    ▼                                             │
-retrieval baseline ◄─── narrativo opcional ──────┘
-   │              (fusión de ambas = hybrid,
-   │               DESCARTADO en Fase 2C; off por defecto)
+retrieval ────── fusión narrativa ───────────────┘
+   │            (hybrid DESCARTADO, off por
+   │             defecto — ver docs/README.md)
    ▼
-Qwen3 1.7B (vía Ollama)  →  evidencia → razonamiento → conclusión
+LLM (vía Ollama; qwen3:1.7b por defecto)
+   →  evidencia → razonamiento → conclusión
 ```
 
 Sin frameworks de IA (ni LangChain ni similares): la comunicación con Ollama es HTTP directo.
@@ -43,10 +44,8 @@ Sin agentes ni PostgreSQL: son fases posteriores (ver [Roadmap](#roadmap)).
 
 **Dos fuentes de retrieval:** el baseline de Qdrant (principal, intacto) y la **memoria
 narrativa** (índice local de capítulos que localiza los trozos relevantes por estructura
-narrativa y resuelve el texto final siempre en Qdrant). En la Fase 2C se probó además una
-fusión de ambas (`scripts/evaluate_hybrid.py`) y el resultado fue **descartarla**: no mejora
-nada sobre la memoria sola y duplica el tiempo. El veredicto completo está en
-`data/eval_answers/hybrid_report.md`.
+narrativa y resuelve el texto final siempre en Qdrant). Los experimentos controlados y sus
+conclusiones están en [docs/](docs/README.md).
 
 ## Requisitos
 
@@ -61,7 +60,7 @@ nada sobre la memoria sola y duplica el tiempo. El veredicto completo está en
 ### Modelo recomendado (hardware de desarrollo probado)
 
 En una GPU de **4 GB de VRAM** se midieron los siguientes tiempos por respuesta
-(sobre el libro de ejemplo, 8 fragmentos de contexto):
+(sobre una novela de ejemplo, 8 fragmentos de contexto):
 
 | Modelo | think | tiempo por respuesta | observación |
 |---|---|---|---|
@@ -74,7 +73,8 @@ En una GPU de **4 GB de VRAM** se midieron los siguientes tiempos por respuesta
 Por eso la configuración actual es **`qwen3:1.7b` + `LLM_THINK=false`**: el razonamiento
 oculto (thinking) de los modelos `qwen3` duplica/triplica el tiempo por respuesta, y
 `think=false` lo desactiva explícitamente. Con `LLM_MODEL` puedes volver a `qwen3:8b` u
-otro modelo, y con `LLM_THINK=true` reactivar el razonamiento si la pregunta lo exige.
+otro modelo, y con `LLM_THINK=true` reactivar el razonamiento si la pregunta lo exige. El
+benchmark controlado de alternativas está en [docs/model_benchmark_phase3.md](docs/model_benchmark_phase3.md).
 
 ## Instalación
 
@@ -109,7 +109,7 @@ data/books/<tu-novela>.docx
 ```
 
 (La carpeta se crea automáticamente; también puedes generarla a mano. El `book_id` que se
-usa en las búsquedas deriva del nombre del archivo, p. ej. `La-Novia-2026.docx` → `la-novia-2026`.)
+usa en las búsquedas deriva del nombre del archivo, p. ej. `Mi-Libro.docx` → `mi-libro`.)
 
 > El `.docx` debe usar **estilos de encabezado de Word** (Título 1 / Heading 1) para los
 > capítulos: es el método de detección más fiable. Si no los usa, el sistema intenta por
@@ -129,8 +129,8 @@ Re-indexar el mismo libro es **idempotente**: borra y reescribe sus chunks.
 ### 2. Hacer preguntas
 
 ```powershell
-python scripts/ask.py "¿Qué sabe el protagonista en el capítulo 25 que su compañero todavía desconoce?"
-python scripts/ask.py "¿Cómo evoluciona la relación entre ambos del capítulo 8 al 20?" --top-k 12
+python scripts/ask.py "¿Qué pista del capítulo 25 explica un giro posterior del protagonista?"
+python scripts/ask.py "¿Cómo evoluciona la relación entre dos personajes del capítulo 8 al 20?" --top-k 12
 python scripts/ask.py "Busca solo en el capítulo 6" --chapter 6
 ```
 
@@ -141,7 +141,7 @@ La respuesta sigue el patrón **Evidencia → Razonamiento → Conclusión**, ci
 El modelo puede inferir sobre el contexto recuperado, pero **tiene prohibido inventar
 acontecimientos**; si la evidencia no basta, lo dice explícitamente.
 
-### 2b. Memoria narrativa (segunda fuente de retrieval, Fase 2B)
+### 2b. Memoria narrativa (segunda fuente de retrieval)
 
 Índice local de la novela que localiza qué capítulos/trozos responden a una pregunta a
 partir de la estructura narrativa (capítulos, personajes, líneas temporales). **Solo
@@ -152,98 +152,42 @@ localiza**: el texto final de cada candidato se resuelve siempre en Qdrant (nunc
 # 1) Construir la memoria de tu novela (aliases del libro opcionales)
 python scripts/build_narrative_memory.py --book data/books/<tu-novela>.docx --aliases data/aliases.json
 #    → data/narrative_memory.json
-
-# 2) Evaluar la memoria contra las mismas preguntas del baseline (Fase 2B)
-python scripts/evaluate_narrative_retrieval.py --eval-file data/eval_questions.json
-
-# 3) Comparar baseline vs memoria vs fusión (experimento Fase 2C)
-python scripts/evaluate_hybrid.py --eval-file data/eval_questions.json --out data/eval_answers/hybrid.json
-python scripts/build_hybrid_report.py          # → data/eval_answers/hybrid_report.md
 ```
 
-> **Veredicto Fase 2C (con datos):** la memoria narrativa mejora el retrieval del baseline
-> (recall@8 de 0.75 → 0.906, recupera 4/7 capítulos que el baseline perdía). La **fusión
-> hybrid está descartada**: no añade recall, no mejora los grades y duplica el tiempo de
-> retrieval. El cuello de botella actual es la **generación** (`qwen3:1.7b`), no el
-> retrieval: las respuestas correctas no subieron y aparecen más alucinaciones.
+### 3. Evaluación y experimentos
 
-### 3. Evaluar la recuperación
-
-Los tests unitarios verifican que el código funciona; para medir la **calidad** de la
-recuperación crea un JSON y ejecuta:
+Para evaluar la **recuperación**, crea un JSON con las preguntas y los capítulos esperados:
 
 ```jsonc
 // data/eval_questions.json
 {
-  "book_id": "la-novia-2026",
+  "book_id": "<tu-novela>",
   "top_k": 8,
   "questions": [
-    { "question": "¿Estaba ya enamorado X en el capítulo 20?", "expected_chapters": [20, 21] },
-    { "question": "¿Qué pista del capítulo 6 adquiere sentido tras el 22?", "expected_chapters": [6, 22] }
+    { "question": "¿Qué pista aparece en el capítulo 3 y se resuelve en el 10?", "expected_chapters": [3, 10] },
+    { "question": "¿Qué información conoce el protagonista al final que al principio no?", "expected_chapters": [1, 12] }
   ]
 }
 ```
 
 ```powershell
+# Evaluar la recuperación (recall@k por pregunta)
 python scripts/evaluate_retrieval.py --eval-file data/eval_questions.json
-```
 
-Informa por pregunta qué capítulos recuperó vs. cuáles se esperaban (`recall@k`) y un
-resumen agregado. El detalle se guarda en `data/eval_questions.results.json`.
-
-### 3b. Experimentos de retrieval (Fase 1.5)
-
-Compara **estrategias de recuperación** × **tamaños de chunk** con las mismas preguntas:
-
-- Estrategias: `baseline` (búsqueda única), `multi-query` (expansión heurística de la
-  pregunta en varias consultas), `multi-query+mmr` (multi-query + rerank MMR que reparte
-  los resultados entre capítulos distintos).
-- Chunk sizes: 300/50, 500/50, 700/50 y 700/100 tokens de tamaño/overlap, cada uno en su
-  propia colección Qdrant (`narrative_c300_o50`, `narrative_c500_o50`,
-  `narrative_c700_o100`, ...). El ganador fue **700/100**; la comparación completa está en
-  `docs/retrieval_experiments_phase1_5.md`.
-
-```powershell
+# Experimentos de retrieval (estrategias × tamaños de chunk)
 python scripts/evaluate_retrieval_experiments.py --book data/books/<tu-novela>.docx
-```
 
-Reutiliza colecciones ya pobladas automáticamente (no re-embebe por defecto). Mide
-`recall@k` (5/8/10), tasa de acierto (≥1 capítulo esperado), recall en preguntas
-multi-capítulo y el tiempo medio por consulta. Salidas en `data/experiments/`
-(detalle por configuración + `summary.json`); el baseline V1 no se toca.
+# Regenerar respuestas sobre el contexto congelado de una ejecución previa
+python scripts/evaluate_answers.py --from-results data/eval_answers/results_baseline700.json --model <otro-modelo> --label <etiqueta>
 
-### 3c. Experimentos de generación (Fase 2D)
-
-Aísla el efecto del **system prompt** en la generación manteniendo modelo y contexto
-fijos: `evaluate_answers.py --from-results` reutiliza el contexto exacto de un
-`results_*.json` previo y solo regenera la respuesta con otro prompt/LLM, y
-`compare_answers.py` cruza dos ejecuciones (grade, tiempo y tokens por pregunta).
-
-```powershell
-# Regenerar las respuestas con el prompt "grounding" sobre el contexto del baseline
-python scripts/evaluate_answers.py --from-results data/eval_answers/results_baseline700.json `
-  --model qwen3:1.7b --system-prompt grounding --label grounding700
-
-# Comparar baseline vs grounding
+# Comparar dos ejecuciones (grade, tiempo y tokens por pregunta)
 python scripts/compare_answers.py `
-  --a-results data/eval_answers/results_baseline700.json --a-grades data/eval_answers/grades_baseline700.json --a-label baseline `
-  --b-results data/eval_answers/results_grounding700.json --b-grades data/eval_answers/grades_grounding700.json --b-label grounding `
-  --out data/eval_answers/compare_grounding_vs_baseline.md
+  --a-results <a.json> --a-grades <a-grades.json> --a-label <A> `
+  --b-results <b.json> --b-grades <b-grades.json> --b-label <B> --out <informe.md>
 ```
 
-El preset por defecto es `--system-prompt baseline` (`SYSTEM_PROMPT`, sin cambios de
-comportamiento en runtime); `grounding` es una variante estricta experimental que no se
-usa en producción.
-
-> **Veredicto Fase 2D (con datos):** el prompt de grounding estricto (identificar evidencia
-> primero, distinguir hechos/inferencias, prohibido conocimiento externo, citar fragmentos)
-> **no mejora** la calidad con `qwen3:1.7b`/`think=false`: baseline 3 correctas / 8 parciales /
-> 4 incorrectas / 1 alucinación vs grounding 2 / 9 / 3 / 2. Solo redujo ligeramente tiempo y
-> tokens. Los errores persisten incluso con la evidencia correcta en el contexto (elemento
-> primordial, destino tras el café, cargo judicial) y, ante gaps de retrieval, el modelo sigue
-> alucinando en lugar de declarar evidencia insuficiente. El cuello de botella actual es la
-> **capacidad del modelo**, no el prompt. Veredicto completo en
-> `data/eval_answers/compare_grounding_vs_baseline.md`.
+El detalle de cada experimento y su conclusión está en [docs/](docs/README.md); los datos
+brutos y los informes generados viven en `data/eval_answers/`.
 
 ### 4. API (opcional en V1)
 
@@ -282,14 +226,14 @@ python scripts/ask.py "¿Qué pasa en el capítulo 3?"
 | `TOP_K` | `8` | Fragmentos recuperados por pregunta |
 | `EMBEDDING_BATCH_SIZE` | `32` | Lote de textos por llamada a Ollama |
 | `LLM_TEMPERATURE` | `0.2` | Temperatura del LLM |
-| `RETRIEVAL_QUERY_EXPANSION` | `off` | Expansión multi-query: `off`, `heuristic` o `llm` (off ganó los experimentos; la LLM es mucho más lenta) |
-| `RETRIEVAL_RERANK` | `none` | Rerank: `none` o `mmr` (diversidad por capítulo; none ganó los experimentos) |
+| `RETRIEVAL_QUERY_EXPANSION` | `off` | Expansión multi-query: `off`, `heuristic` o `llm` (`off` por defecto; ver docs/) |
+| `RETRIEVAL_RERANK` | `none` | Rerank: `none` o `mmr` (diversidad por capítulo; `none` por defecto; ver docs/) |
 | `RETRIEVAL_MAX_QUERIES` | `4` | Máximo de sub-consultas generadas por pregunta |
 | `RETRIEVAL_CANDIDATES_PER_QUERY` | `8` | Candidatos por sub-consulta antes de fusionar/rerank |
 | `RETRIEVAL_DIVERSITY_LAMBDA` | `0.7` | Peso de la diversidad en MMR (1 = solo relevancia) |
 | `RETRIEVAL_CHAPTER_PENALTY` | `0.5` | Penalización a capítulos ya representados en MMR |
-| `HYBRID_MEMORY_PATH` | `data/narrative_memory.json` | Memoria narrativa (segunda fuente, Fase 2B) |
-| `RETRIEVAL_HYBRID` | `off` | **Experimental, DESCARTADO (Fase 2C).** `off` por defecto; la fusión Qdrant+memoria no aportó mejoras y se conserva solo como referencia (ver `data/eval_answers/hybrid_report.md`) |
+| `HYBRID_MEMORY_PATH` | `data/narrative_memory.json` | Memoria narrativa (segunda fuente) |
+| `RETRIEVAL_HYBRID` | `off` | **Experimental, DESCARTADO (Fase 2C).** Fusión Qdrant+memoria, solo como referencia (ver [docs](docs/memory_narrative_phase2b_2c.md)) |
 
 Las variables `HYBRID_*` restantes (`HYBRID_NARRATIVE_TOP`, `HYBRID_CHUNKS_PER_CHAPTER`,
 `HYBRID_FUSION`, `HYBRID_WEIGHT_BASELINE`, `HYBRID_WEIGHT_NARRATIVE`) solo se usan al
@@ -316,9 +260,9 @@ app/
   embeddings/    OllamaEmbedder (interfaz Embedder)
   vector_store/  QdrantStore (local o remote, mismo interfaz)
   retrieval/     Searcher multi-query + expanders (off/heurístico/LLM) + reranker MMR
-                 + hybrid.py (fusión experimental, DESCARTADO en Fase 2C)
+                 + hybrid.py (fusión experimental, DESCARTADO)
   memory/        memoria narrativa: construcción, retrieval por capítulos y
-                 postproceso con aliases (segunda fuente, Fase 2B)
+                 postproceso con aliases (segunda fuente)
   llm/           OllamaLLM + prompts (interfaz LLM intercambiable)
   api/           FastAPI mínima
   service.py     orquestación: ingest_book() / search() / ask_question()
@@ -327,8 +271,9 @@ scripts/         ingest.py, ask.py, make_sample_book.py,
                  evaluate_retrieval.py, evaluate_retrieval_experiments.py,
                  evaluate_hybrid.py, build_hybrid_report.py
 tests/           unitarios + smoke de integración opcional
+docs/            experimentos y conclusiones (ver docs/README.md)
 data/            (fuera de Git) books/, qdrant_local/, eval_answers/,
-                 narrative_memory.json, aliases.json (datos de tu libro)
+                 narrative_memory.json, aliases.json (datos de tus libros)
 ```
 
 ## Trazabilidad de cada fragmento
@@ -340,20 +285,16 @@ Los chunks nunca cortan un párrafo a la mitad.
 
 ## Roadmap (fuera de la V1)
 
-- **Fase 2B — memoria narrativa (completada):** índice de capítulos como segunda fuente de
-  retrieval; mejora el recall@8 sobre el baseline y recupera 4/7 gaps que el baseline perdía.
-- **Fase 2C — fusion hybrid (completada, descartada):** la fusion Qdrant+memoria no mejoro
-  nada sobre la memoria sola y duplico el tiempo; se conserva solo como referencia
-  (`retrieval_hybrid=off`). Veredicto: el cuello de botella es la **generacion**, no el
-  retrieval.
-- **Fase 2D — prompt grounding (completada, descartada):** el prompt estricto de grounding no
-  mejoro la generacion sobre el baseline (incluso empeoro ligeramente la calidad); se conserva
-  solo como infraestructura de experimento (`--system-prompt grounding`). El cuello de botella
-  sigue siendo la **capacidad del modelo**.
-- **Fase 3 (siguiente):** benchmark controlado de modelos LLM (mismo contexto/retrieval,
-  distintos modelos y `think` on/off) para elegir el modelo de generacion.
-- Fase 4: agente con herramientas explicitas (`search_book`, `get_chapter`, ...).
+- **Fase 2B — memoria narrativa (completada):** segunda fuente de retrieval adoptada
+  ([docs](docs/memory_narrative_phase2b_2c.md)).
+- **Fase 2C — fusión hybrid (completada, descartada):** se conserva solo como referencia,
+  `RETRIEVAL_HYBRID=off` ([docs](docs/memory_narrative_phase2b_2c.md)).
+- **Fase 2D — prompt grounding (completada, descartada):** queda como infraestructura de
+  experimento, `--system-prompt grounding` ([docs](docs/generation_experiments_phase2d.md)).
+- **Fase 3 — benchmark de modelos LLM (completada):** se mantiene `qwen3:1.7b`
+  ([docs](docs/model_benchmark_phase3.md)).
+- **Fase 4 (siguiente):** agente con herramientas explícitas (`search_book`, `get_chapter`, ...).
 - Fase 5: memoria narrativa estructurada en grafo (personajes, acontecimientos, relaciones,
-  estado de conocimiento por personaje, cronologia) con PostgreSQL opcional.
+  estado de conocimiento por personaje, cronología) con PostgreSQL opcional.
 - Extracción automática de personajes.
 - Frontend Next.js + TypeScript.
